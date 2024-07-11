@@ -1,5 +1,284 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.3.3">Jekyll</generator><link href="https://bitbrain.github.io/feed.xml" rel="self" type="application/atom+xml" /><link href="https://bitbrain.github.io/" rel="alternate" type="text/html" /><updated>2024-06-02T00:25:26+00:00</updated><id>https://bitbrain.github.io/feed.xml</id><title type="html">bitbrain</title><subtitle>Miguel is a software engineer and indie game developer currently based in the UK. &lt;br/&gt;He occasionally blogs about software design, continuous integration and game development with Godot Engine.
-</subtitle><author><name>bitbrain</name></author><entry><title type="html">Godot Version Compatibility: A Guide for Addon Developers</title><link href="https://bitbrain.github.io/2023/09/03/godot-addon-compatibility.html" rel="alternate" type="text/html" title="Godot Version Compatibility: A Guide for Addon Developers" /><published>2023-09-03T00:00:00+00:00</published><updated>2023-09-03T00:00:00+00:00</updated><id>https://bitbrain.github.io/2023/09/03/godot-addon-compatibility</id><content type="html" xml:base="https://bitbrain.github.io/2023/09/03/godot-addon-compatibility.html"><![CDATA[<p><strong>Godot addons offer a powerful way to extend the engine’s functionality without having to modify its core.</strong> This flexibility empowers the community to create custom solutions without burdening the engine itself. However, as addon developers, we must strike a balance between compatibility and functionality. This article explores the trade-offs involved, focusing primarily on Godot Engine 4.x.</p>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.3.3">Jekyll</generator><link href="https://bitbrain.github.io/feed.xml" rel="self" type="application/atom+xml" /><link href="https://bitbrain.github.io/" rel="alternate" type="text/html" /><updated>2024-07-11T19:56:51+00:00</updated><id>https://bitbrain.github.io/feed.xml</id><title type="html">bitbrain</title><subtitle>Miguel is a software engineer and indie game developer currently based in the UK. &lt;br/&gt;He occasionally blogs about software design, continuous integration and game development with Godot Engine.
+</subtitle><author><name>bitbrain</name></author><entry><title type="html">Godot File Compression</title><link href="https://bitbrain.github.io/2024/07/10/godot-file-compression.html" rel="alternate" type="text/html" title="Godot File Compression" /><published>2024-07-10T00:00:00+00:00</published><updated>2024-07-10T00:00:00+00:00</updated><id>https://bitbrain.github.io/2024/07/10/godot-file-compression</id><content type="html" xml:base="https://bitbrain.github.io/2024/07/10/godot-file-compression.html"><![CDATA[<p>I am maintaining a <a href="https://godotengine.org">Godot Engine</a> addon called <a href="https://github.com/bitbrain/pandora">Pandora</a> and maintainers reported a very strange bug that I solved in <a href="https://github.com/bitbrain/pandora/pull/185">this pull request</a>:</p>
+
+<p>The compression of the <code class="language-plaintext highlighter-rouge">data.pandora</code> file was not working and in this blog article I want to explain how compression in Godot works, how I solved it and maybe you can learn a thing or two!</p>
+
+<p><a href="https://github.com/bitbrain/pandora"><img src="/public/media/pandora-logo.svg" alt="pandora-logo" /></a></p>
+
+<h1 id="why-compression">Why compression?</h1>
+
+<p>Compression is by no means a way to encrypt your data. Someone with malicious intent <strong>can</strong> decompress the contents and modify it to their needs. However, compression is still useful to reduce the size of the final <code class="language-plaintext highlighter-rouge">.pck</code> file that gets shipped with your Godot game. Also, as an added bonus, it will be much harder for someone without technical knowledge to modify e.g. raw json files.</p>
+
+<h1 id="storing-json">Storing JSON</h1>
+
+<p>Imagine you have some json like so:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"item"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Golden Axe"</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>and you want to store that to a file. Usually, in Godot you can do this:</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">var</span> <span class="n">file</span> <span class="o">=</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">'</span><span class="s1">item.json'</span><span class="p">,</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">WRITE</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This then allows you to write to the file our item like so:</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">var</span> <span class="n">data</span><span class="p">:</span><span class="kt">Dictionary</span> <span class="o">=</span> <span class="p">{</span> <span class="n">item</span><span class="p">:</span> <span class="s2">"Golden Axe"</span> <span class="p">}</span>
+<span class="n">file</span><span class="o">.</span><span class="n">store_string</span><span class="p">(</span><span class="n">JSON</span><span class="o">.</span><span class="n">stringify</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+<span class="n">file</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div></div>
+
+<h1 id="storing-compressed-files">Storing compressed files</h1>
+
+<p>So far, so good. Now, how would we actually store compressed files? The code looks surprisingly similar!</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">var</span> <span class="n">file</span> <span class="o">=</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">open_compressed</span><span class="p">(</span><span class="s2">'</span><span class="s1">item.json'</span><span class="p">,</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">WRITE</span><span class="p">)</span>
+<span class="k">var</span> <span class="n">data</span><span class="p">:</span><span class="kt">Dictionary</span> <span class="o">=</span> <span class="p">{</span> <span class="n">item</span><span class="p">:</span> <span class="s2">"Golden Axe"</span> <span class="p">}</span>
+<span class="n">file</span><span class="o">.</span><span class="n">store_string</span><span class="p">(</span><span class="n">JSON</span><span class="o">.</span><span class="n">stringify</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+<span class="n">file</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div></div>
+
+<p>So, what is the problem here if this code works fine? It has to do with exporting your game in Godot!</p>
+
+<h1 id="exporting-addon-files">Exporting addon files</h1>
+
+<p>When someone uses a Godot addon that relies on specific files (such as <code class="language-plaintext highlighter-rouge">data.pandora</code> files for storing state), those files will <strong>not</strong> be automatically exported.</p>
+
+<blockquote>
+  <p>Pandora does not use a <code class="language-plaintext highlighter-rouge">.json</code> but rather <code class="language-plaintext highlighter-rouge">.pandora</code> extension on purpose to discourage people from modifying it manually.</p>
+</blockquote>
+
+<p>When exporting the game, one would need to define the exported files explicitly in the export settings:</p>
+
+<p><img src="/public/media/godot-export.png" alt="godot-export" /></p>
+
+<p>However, this is not sustainable and having to remember to register random files whenever you want to export your game does not scale. This is why Godot introduced the <code class="language-plaintext highlighter-rouge">EditorExportPlugin</code>:</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">@</span><span class="k">tool</span>
+<span class="k">extends</span> <span class="n">EditorPlugin</span>
+
+<span class="k">func</span> <span class="nf">_enter_tree</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">void</span><span class="p">:</span>
+   <span class="n">add_export_plugin</span><span class="p">(</span><span class="n">MyExportPlugin</span><span class="o">.</span><span class="n">new</span><span class="p">())</span>
+
+<span class="k">class</span> <span class="nc">MyExportPlugin</span> <span class="k">extends</span> <span class="n">EditorExportPlugin</span><span class="p">:</span>
+
+	<span class="k">func</span> <span class="nf">_export_begin</span><span class="p">(</span><span class="n">features</span><span class="p">:</span> <span class="n">PackedStringArray</span><span class="p">,</span> <span class="n">is_debug</span><span class="p">:</span> <span class="kt">bool</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="kt">String</span><span class="p">,</span> <span class="n">flags</span><span class="p">:</span> <span class="kt">int</span><span class="p">):</span>
+    <span class="c1"># add_file("some-file.json", data, false)</span>
+    <span class="k">pass</span>
+
+	<span class="k">func</span> <span class="nf">_get_name</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kt">String</span><span class="p">:</span>
+		<span class="k">return</span> <span class="s2">"MyExportPlugin"</span>
+</code></pre></div></div>
+
+<p>As you can see, this plugin gets shipped with the addon and it allows the addon creator to specify additional files that should be auto-exported when someone uses the addon. In Pandora, the <code class="language-plaintext highlighter-rouge">data.pandora</code> file should not be compressed by default when being used in the editor but only for <strong>release builds</strong>. Reason being is that it is much more friendly for version control systems like <a href="https://git-scm.com">git</a> and it also makes debugging things easier within Pandora itself.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">is_debug</code> flag tells us if someone intents to export a game as debug or release build, so we can use the flag to conditionally add the file.</p>
+
+<blockquote>
+  <p>Note: the <code class="language-plaintext highlighter-rouge">path</code> argument of the <code class="language-plaintext highlighter-rouge">_export_begin</code> method is the path where the game will be exported to.</p>
+</blockquote>
+
+<p>The <code class="language-plaintext highlighter-rouge">add_file</code> signature requires a <code class="language-plaintext highlighter-rouge">PackedByteArray</code> as a 2nd argument, which effectively is the bytes of the file that should be stored away:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>func _export_begin(features: PackedStringArray, is_debug: bool, path: String, flags: int):
+    var pandora_path = "res://data.pandora"
+    # open the uncompressed normal file from the project folder
+    var file = FileAccess.open(pandora_path, FileAccess.READ)
+    # let's get the bytes from the file
+    var data:PackedByteArray = file.get_buffer(file.get_length())
+    add_file(pandora_path, data, false)
+    # always remember to close the file
+    file.close()
+</code></pre></div></div>
+
+<p>so, how do we store the file compressed? We cannot use <code class="language-plaintext highlighter-rouge">open_compressed</code> here because the file we are trying to store compressed is uncompressed:</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">var</span> <span class="n">pandora_path</span> <span class="o">=</span> <span class="s2">"res://data.pandora"</span>
+  <span class="c1"># This will fail! `data.pandora` file is not compressed!</span>
+  <span class="k">var</span> <span class="n">file</span> <span class="o">=</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">open_compressed</span><span class="p">(</span><span class="n">pandora_path</span><span class="p">,</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">READ</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>A first idea I had was to <a href="https://docs.godotengine.org/en/stable/classes/class_packedbytearray.html#class-packedbytearray-method-compress">compress</a> the <code class="language-plaintext highlighter-rouge">PackedByteArray</code> itself:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>var data:PackedByteArray = file.get_buffer(file.get_length())
+add_file(pandora_path, data.compress(), false)
+</code></pre></div></div>
+
+<p>the assumption is that the exported file can be opened like this when running your <strong>release</strong> build of your game at runtime:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>var data = FileAccess.open_compressed("res://data.pandora", FileAccess.READ)
+</code></pre></div></div>
+
+<p>However, that fails with error code <code class="language-plaintext highlighter-rouge">15</code>. What on earth is that error? I highly recommend bookmarking the <a href="https://docs.godotengine.org">official Godot docs</a>, because they are extremely useful, especially for situations like this: we find our answer in the ancient archives under the <code class="language-plaintext highlighter-rouge">Error</code> section (<a href="https://docs.godotengine.org/en/stable/classes/class_%40globalscope.html#enum-globalscope-error">link</a>):</p>
+
+<blockquote>
+  <p>Error ERR_FILE_UNRECOGNIZED = 15</p>
+
+  <p>File: Unrecognized error.</p>
+</blockquote>
+
+<p>Ah, so Godot itself does not recognize the file as compressed!</p>
+
+<h1 id="solving-the-mystery">Solving the mystery</h1>
+
+<p>I reached out on the official <strong>Godot Contributor chat</strong> and <a href="https://chat.godotengine.org/channel/editor?msg=n8yvre5oNTSg8n4Rg">contributor bruvzg kindly provided me</a> with this information:</p>
+
+<blockquote>
+  <p>[…] you can replicate compressed file format if you want it to be readable with open_compressed, it’s not complex, the mine difference compressing is done in blocks, format is:</p>
+</blockquote>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>magic
+    char[4] "GCPF"
+
+header
+    uint32_t compression_mode (Compression::MODE_ZSTD by default)
+    uint32_t block_size (4096 by default)
+    uint32_t uncompressed_size
+
+block compressed sizes, number of blocks = (uncompressed_size / block_size) + 1
+    uint32_t block_sizes[]
+
+followed by compressed block data, same as calling `compress` for each source `block_size`
+</code></pre></div></div>
+
+<p>In case you are confused now, stay with me - this all will make sense in a bit. The format you are seeing there is <strong>not code</strong> but it describes <strong>bytes</strong> that need to be present in the compressed file for Godot to understand it. Picture it like a recipe or instruction manual that is stored at the beginning of your file and Godot will read that to understand what to do with your compressed content.</p>
+
+<h1 id="what-are-bytes-anyway">What are bytes anyway?</h1>
+
+<p>To decompress for a bit (pun intended), let us take a step back and understand how our exported file actually looks like. Remember, we previously attempted to export our file like so:</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">var</span> <span class="n">data</span><span class="p">:</span><span class="n">PackedByteArray</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">get_buffer</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">get_length</span><span class="p">())</span>
+<span class="n">add_file</span><span class="p">(</span><span class="n">pandora_path</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">compress</span><span class="p">(),</span> <span class="bp">false</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>We can use a nifty tool like <a href="https://github.com/DmitriySalnikov/GodotPCKExplorer">GodotPCKExplorer</a> to inspect + unpack exported Godot builds. This becomes especially useful to investigate the export logic of our <code class="language-plaintext highlighter-rouge">EditorExportPlugin</code>. Opening the <code class="language-plaintext highlighter-rouge">pck</code> file to our exported <strong>release</strong> build of our game indeed shows the file:</p>
+
+<p><img src="/public/media/godot-pck-explorer.png" alt="godot-pck-explorer" /></p>
+
+<p>We then can click <code class="language-plaintext highlighter-rouge">Extract &gt; Extract Selected</code> and save the file to a location of our choice. This then allows us to inspect the file furter. Opening that file in a text editor shows us an odd character:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{
+  "item": "Golden Pickaxe"
+}
+</code></pre></div></div>
+
+<p>This is because the file is compressed - there is a much better way at looking at the file itself, which is by using a hex editor, such as <a href="https://hexed.it/">hexed.it</a>:
+<img src="/public/media/data-pandora-bytes.png" alt="data-pandora-bytes" /></p>
+
+<p>A <code class="language-plaintext highlighter-rouge">char</code> is precisely 1 byte, and looking at our compression spec again, Godot expects the first 4 bytes to consist of the following characters: <code class="language-plaintext highlighter-rouge">GCPF</code>, which would look like this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>47 43 50 46
+</code></pre></div></div>
+
+<p>In case a file does not start with these exact bytes, Godot will not be able to open it correctly. The same goes for the next byte headers: <code class="language-plaintext highlighter-rouge">uint32_t</code> is precisely 4 bytes, meaning the next 12 bytes should contain the <code class="language-plaintext highlighter-rouge">compression_mode</code>, <code class="language-plaintext highlighter-rouge">block_size</code> and <code class="language-plaintext highlighter-rouge">uncompressed_size</code>:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>47 43 50 46 00 00 00 00 00 10 00 00 1E 00 00 00
+</code></pre></div></div>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">00 00 00 00</code> is the compression mode - we pick the default which is MODE_ZSTD (0)</li>
+  <li><code class="language-plaintext highlighter-rouge">00 10 00 00</code> represents 4096 as the block size</li>
+  <li><code class="language-plaintext highlighter-rouge">1E 00 00 00</code> is the uncompressed size of our file = 30 bytes</li>
+</ul>
+
+<p>The remaining bytes will be the compressed data that gets produced by compressing our <code class="language-plaintext highlighter-rouge">PackedByteArray</code>.</p>
+
+<h1 id="applying-the-knowledge">Applying the knowledge</h1>
+
+<p>With our gained knowledge, let us create a new script that is able to compress any text into Godot compatible <code class="language-plaintext highlighter-rouge">PackedByteArray</code> format!</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># The block size which we hardcode</span>
+<span class="k">const</span> <span class="n">BLOCK_SIZE</span> <span class="o">=</span> <span class="mi">4096</span>
+<span class="c1"># Godot Compression magic keyword</span>
+<span class="k">const</span> <span class="n">MAGIC</span> <span class="o">=</span> <span class="s2">"GCPF"</span>
+
+
+<span class="c1">## magic</span>
+<span class="c1">##     char[4] "GCPF"</span>
+<span class="c1">##</span>
+<span class="c1">## header</span>
+<span class="c1">##     uint32_t compression_mode (Compression::MODE_ZSTD by default)</span>
+<span class="c1">##     uint32_t block_size (4096 by default)</span>
+<span class="c1">##     uint32_t uncompressed_size</span>
+<span class="c1">##</span>
+<span class="c1">## block compressed sizes, number of blocks = (uncompressed_size / block_size) + 1</span>
+<span class="c1">##     uint32_t block_sizes[]</span>
+<span class="c1">##</span>
+<span class="c1">## followed by compressed block data, same as calling `compress` for each source `block_size`</span>
+<span class="k">static</span> <span class="k">func</span> <span class="nf">compress</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="kt">String</span><span class="p">,</span> <span class="n">compression_mode</span><span class="p">:</span><span class="n">FileAccess</span><span class="o">.</span><span class="n">CompressionMode</span> <span class="o">=</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">COMPRESSION_FASTLZ</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PackedByteArray</span><span class="p">:</span>
+	<span class="k">var</span> <span class="n">data</span> <span class="o">=</span> <span class="n">_encode_string</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+	<span class="k">var</span> <span class="n">uncompressed_size</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+
+	<span class="k">var</span> <span class="n">num_blocks</span> <span class="o">=</span> <span class="kt">int</span><span class="p">(</span><span class="nb">ceil</span><span class="p">(</span><span class="kt">float</span><span class="p">(</span><span class="n">uncompressed_size</span><span class="p">)</span> <span class="o">/</span> <span class="n">BLOCK_SIZE</span><span class="p">))</span>
+
+	<span class="k">var</span> <span class="n">buffer</span> <span class="o">=</span> <span class="n">PackedByteArray</span><span class="p">()</span>
+
+	<span class="n">buffer</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="n">_encode_string</span><span class="p">(</span><span class="n">MAGIC</span><span class="p">))</span>
+
+	<span class="n">buffer</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="n">_encode_uint32</span><span class="p">(</span><span class="n">compression_mode</span><span class="p">))</span>
+	<span class="n">buffer</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="n">_encode_uint32</span><span class="p">(</span><span class="n">BLOCK_SIZE</span><span class="p">))</span>
+	<span class="n">buffer</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="n">_encode_uint32</span><span class="p">(</span><span class="n">uncompressed_size</span><span class="p">))</span>
+
+	<span class="k">var</span> <span class="n">block_sizes</span> <span class="o">=</span> <span class="n">PackedByteArray</span><span class="p">()</span>
+	<span class="k">var</span> <span class="n">compressed_blocks</span> <span class="o">=</span> <span class="p">[]</span>
+
+	<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_blocks</span><span class="p">):</span>
+		<span class="k">var</span> <span class="n">start</span> <span class="o">=</span> <span class="n">i</span> <span class="o">*</span> <span class="n">BLOCK_SIZE</span>
+		<span class="k">var</span> <span class="n">end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">((</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">BLOCK_SIZE</span><span class="p">,</span> <span class="n">uncompressed_size</span><span class="p">)</span>
+		<span class="k">var</span> <span class="n">block_data</span> <span class="o">=</span> <span class="n">PackedByteArray</span><span class="p">()</span>
+		<span class="k">var</span> <span class="n">block_index</span> <span class="o">=</span> <span class="n">start</span>
+		<span class="k">while</span> <span class="n">block_index</span> <span class="o">&lt;</span> <span class="n">end</span><span class="p">:</span>
+			<span class="n">block_data</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">block_index</span><span class="p">])</span>
+			<span class="n">block_index</span> <span class="o">+=</span> <span class="mi">1</span>
+
+		<span class="k">var</span> <span class="n">compressed_block</span> <span class="o">=</span> <span class="n">block_data</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">compression_mode</span><span class="p">)</span>
+		<span class="n">block_sizes</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="n">_encode_uint32</span><span class="p">(</span><span class="n">compressed_block</span><span class="o">.</span><span class="n">size</span><span class="p">()))</span>
+		<span class="n">compressed_blocks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">compressed_block</span><span class="p">)</span>
+
+	<span class="n">buffer</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="n">block_sizes</span><span class="p">)</span>
+
+	<span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">compressed_blocks</span><span class="p">:</span>
+		<span class="n">buffer</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="n">block</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="n">buffer</span>
+
+<span class="c1"># Godot is Little Endian by default, so the order here is crucial!</span>
+<span class="k">static</span> <span class="k">func</span> <span class="nf">_encode_uint32</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="kt">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PackedByteArray</span><span class="p">:</span>
+	<span class="k">var</span> <span class="n">arr</span> <span class="o">=</span> <span class="n">PackedByteArray</span><span class="p">()</span>
+	<span class="n">arr</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">value</span> <span class="o">&amp;</span> <span class="mh">0xFF</span><span class="p">)</span>
+	<span class="n">arr</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">value</span> <span class="o">&gt;&gt;</span> <span class="mi">8</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFF</span><span class="p">)</span>
+	<span class="n">arr</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">value</span> <span class="o">&gt;&gt;</span> <span class="mi">16</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFF</span><span class="p">)</span>
+	<span class="n">arr</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">value</span> <span class="o">&gt;&gt;</span> <span class="mi">24</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFF</span><span class="p">)</span>
+	<span class="k">return</span> <span class="n">arr</span>
+
+
+<span class="k">static</span> <span class="k">func</span> <span class="nf">_encode_string</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="kt">String</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PackedByteArray</span><span class="p">:</span>
+	<span class="k">var</span> <span class="n">arr</span> <span class="o">=</span> <span class="n">PackedByteArray</span><span class="p">()</span>
+	<span class="k">for</span> <span class="nb">char</span> <span class="ow">in</span> <span class="n">value</span><span class="p">:</span>
+		<span class="n">arr</span><span class="o">.</span><span class="n">append_array</span><span class="p">(</span><span class="nb">char</span><span class="o">.</span><span class="n">to_ascii_buffer</span><span class="p">())</span>
+	<span class="k">return</span> <span class="n">arr</span>
+</code></pre></div></div>
+
+<p>With this component, we can now easily adjust our previous code:</p>
+
+<div class="language-gd highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">const</span> <span class="n">Compression</span> <span class="o">=</span> <span class="nb">preload</span><span class="p">(</span><span class="s2">'</span><span class="s1">compression.gd'</span><span class="p">)</span>
+
+<span class="k">func</span> <span class="nf">_export_begin</span><span class="p">(</span><span class="n">features</span><span class="p">:</span> <span class="n">PackedStringArray</span><span class="p">,</span> <span class="n">is_debug</span><span class="p">:</span> <span class="kt">bool</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="kt">String</span><span class="p">,</span> <span class="n">flags</span><span class="p">:</span> <span class="kt">int</span><span class="p">):</span>
+    <span class="k">var</span> <span class="n">pandora_path</span> <span class="o">=</span> <span class="s2">"res://data.pandora"</span>
+    <span class="c1"># open the uncompressed normal file from the project folder</span>
+    <span class="k">var</span> <span class="n">file</span> <span class="o">=</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">pandora_path</span><span class="p">,</span> <span class="n">FileAccess</span><span class="o">.</span><span class="n">READ</span><span class="p">)</span>
+    <span class="k">var</span> <span class="n">text</span><span class="p">:</span><span class="kt">String</span> <span class="o">=</span> <span class="n">file</span><span class="o">.</span><span class="n">get_as_text</span><span class="p">()</span>
+    <span class="c1"># compress the file into the correct format so Godot can load it again</span>
+    <span class="k">var</span> <span class="n">compressed</span><span class="p">:</span><span class="n">PackedByteArray</span> <span class="o">=</span> <span class="n">Compression</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">add_file</span><span class="p">(</span><span class="n">pandora_path</span><span class="p">,</span> <span class="n">compressed</span><span class="p">,</span> <span class="bp">false</span><span class="p">)</span>
+    <span class="n">file</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div></div>
+
+<p>With the above trick, you can now open the file via <code class="language-plaintext highlighter-rouge">open_compressed</code> without problems!</p>
+
+<p>I hope you enjoyed this little sneakpeak into the development of my addon. Feel free to checkout <a href="https://github.com/bitbrain/pandora">pandora</a> for yourself. I also have <a href="https://youtube.com/@bitbraindev">a Youtube channel</a> where I document my gamedev journey - check it out!</p>]]></content><author><name>bitbrain</name></author><category term="godot" /><category term="addon" /><category term="gamedev" /><summary type="html"><![CDATA[I am maintaining a Godot Engine addon called Pandora and maintainers reported a very strange bug that I solved in this pull request: The compression of the data.pandora file was not working and in this blog article I want to explain how compression in Godot works, how I solved it and maybe you can learn a thing or two! Why compression? Compression is by no means a way to encrypt your data. Someone with malicious intent can decompress the contents and modify it to their needs. However, compression is still useful to reduce the size of the final .pck file that gets shipped with your Godot game. Also, as an added bonus, it will be much harder for someone without technical knowledge to modify e.g. raw json files. Storing JSON Imagine you have some json like so: { "item": "Golden Axe" } and you want to store that to a file. Usually, in Godot you can do this: var file = FileAccess.open('item.json', FileAccess.WRITE) This then allows you to write to the file our item like so: var data:Dictionary = { item: "Golden Axe" } file.store_string(JSON.stringify(data)) file.close() Storing compressed files So far, so good. Now, how would we actually store compressed files? The code looks surprisingly similar! var file = FileAccess.open_compressed('item.json', FileAccess.WRITE) var data:Dictionary = { item: "Golden Axe" } file.store_string(JSON.stringify(data)) file.close() So, what is the problem here if this code works fine? It has to do with exporting your game in Godot! Exporting addon files When someone uses a Godot addon that relies on specific files (such as data.pandora files for storing state), those files will not be automatically exported. Pandora does not use a .json but rather .pandora extension on purpose to discourage people from modifying it manually. When exporting the game, one would need to define the exported files explicitly in the export settings: However, this is not sustainable and having to remember to register random files whenever you want to export your game does not scale. This is why Godot introduced the EditorExportPlugin: @tool extends EditorPlugin func _enter_tree() -&gt; void: add_export_plugin(MyExportPlugin.new()) class MyExportPlugin extends EditorExportPlugin: func _export_begin(features: PackedStringArray, is_debug: bool, path: String, flags: int): # add_file("some-file.json", data, false) pass func _get_name() -&gt; String: return "MyExportPlugin" As you can see, this plugin gets shipped with the addon and it allows the addon creator to specify additional files that should be auto-exported when someone uses the addon. In Pandora, the data.pandora file should not be compressed by default when being used in the editor but only for release builds. Reason being is that it is much more friendly for version control systems like git and it also makes debugging things easier within Pandora itself. The is_debug flag tells us if someone intents to export a game as debug or release build, so we can use the flag to conditionally add the file. Note: the path argument of the _export_begin method is the path where the game will be exported to. The add_file signature requires a PackedByteArray as a 2nd argument, which effectively is the bytes of the file that should be stored away: func _export_begin(features: PackedStringArray, is_debug: bool, path: String, flags: int): var pandora_path = "res://data.pandora" # open the uncompressed normal file from the project folder var file = FileAccess.open(pandora_path, FileAccess.READ) # let's get the bytes from the file var data:PackedByteArray = file.get_buffer(file.get_length()) add_file(pandora_path, data, false) # always remember to close the file file.close() so, how do we store the file compressed? We cannot use open_compressed here because the file we are trying to store compressed is uncompressed: var pandora_path = "res://data.pandora" # This will fail! `data.pandora` file is not compressed! var file = FileAccess.open_compressed(pandora_path, FileAccess.READ) A first idea I had was to compress the PackedByteArray itself: var data:PackedByteArray = file.get_buffer(file.get_length()) add_file(pandora_path, data.compress(), false) the assumption is that the exported file can be opened like this when running your release build of your game at runtime: var data = FileAccess.open_compressed("res://data.pandora", FileAccess.READ) However, that fails with error code 15. What on earth is that error? I highly recommend bookmarking the official Godot docs, because they are extremely useful, especially for situations like this: we find our answer in the ancient archives under the Error section (link): Error ERR_FILE_UNRECOGNIZED = 15 File: Unrecognized error. Ah, so Godot itself does not recognize the file as compressed! Solving the mystery I reached out on the official Godot Contributor chat and contributor bruvzg kindly provided me with this information: […] you can replicate compressed file format if you want it to be readable with open_compressed, it’s not complex, the mine difference compressing is done in blocks, format is: magic char[4] "GCPF" header uint32_t compression_mode (Compression::MODE_ZSTD by default) uint32_t block_size (4096 by default) uint32_t uncompressed_size block compressed sizes, number of blocks = (uncompressed_size / block_size) + 1 uint32_t block_sizes[] followed by compressed block data, same as calling `compress` for each source `block_size` In case you are confused now, stay with me - this all will make sense in a bit. The format you are seeing there is not code but it describes bytes that need to be present in the compressed file for Godot to understand it. Picture it like a recipe or instruction manual that is stored at the beginning of your file and Godot will read that to understand what to do with your compressed content. What are bytes anyway? To decompress for a bit (pun intended), let us take a step back and understand how our exported file actually looks like. Remember, we previously attempted to export our file like so: var data:PackedByteArray = file.get_buffer(file.get_length()) add_file(pandora_path, data.compress(), false) We can use a nifty tool like GodotPCKExplorer to inspect + unpack exported Godot builds. This becomes especially useful to investigate the export logic of our EditorExportPlugin. Opening the pck file to our exported release build of our game indeed shows the file: We then can click Extract &gt; Extract Selected and save the file to a location of our choice. This then allows us to inspect the file furter. Opening that file in a text editor shows us an odd character: { "item": "Golden Pickaxe" } This is because the file is compressed - there is a much better way at looking at the file itself, which is by using a hex editor, such as hexed.it: A char is precisely 1 byte, and looking at our compression spec again, Godot expects the first 4 bytes to consist of the following characters: GCPF, which would look like this: 47 43 50 46 In case a file does not start with these exact bytes, Godot will not be able to open it correctly. The same goes for the next byte headers: uint32_t is precisely 4 bytes, meaning the next 12 bytes should contain the compression_mode, block_size and uncompressed_size: 47 43 50 46 00 00 00 00 00 10 00 00 1E 00 00 00 00 00 00 00 is the compression mode - we pick the default which is MODE_ZSTD (0) 00 10 00 00 represents 4096 as the block size 1E 00 00 00 is the uncompressed size of our file = 30 bytes The remaining bytes will be the compressed data that gets produced by compressing our PackedByteArray. Applying the knowledge With our gained knowledge, let us create a new script that is able to compress any text into Godot compatible PackedByteArray format! # The block size which we hardcode const BLOCK_SIZE = 4096 # Godot Compression magic keyword const MAGIC = "GCPF" ## magic ## char[4] "GCPF" ## ## header ## uint32_t compression_mode (Compression::MODE_ZSTD by default) ## uint32_t block_size (4096 by default) ## uint32_t uncompressed_size ## ## block compressed sizes, number of blocks = (uncompressed_size / block_size) + 1 ## uint32_t block_sizes[] ## ## followed by compressed block data, same as calling `compress` for each source `block_size` static func compress(text: String, compression_mode:FileAccess.CompressionMode = FileAccess.COMPRESSION_FASTLZ) -&gt; PackedByteArray: var data = _encode_string(text) var uncompressed_size = data.size() var num_blocks = int(ceil(float(uncompressed_size) / BLOCK_SIZE)) var buffer = PackedByteArray() buffer.append_array(_encode_string(MAGIC)) buffer.append_array(_encode_uint32(compression_mode)) buffer.append_array(_encode_uint32(BLOCK_SIZE)) buffer.append_array(_encode_uint32(uncompressed_size)) var block_sizes = PackedByteArray() var compressed_blocks = [] for i in range(num_blocks): var start = i * BLOCK_SIZE var end = min((i + 1) * BLOCK_SIZE, uncompressed_size) var block_data = PackedByteArray() var block_index = start while block_index &lt; end: block_data.append(data[block_index]) block_index += 1 var compressed_block = block_data.compress(compression_mode) block_sizes.append_array(_encode_uint32(compressed_block.size())) compressed_blocks.append(compressed_block) buffer.append_array(block_sizes) for block in compressed_blocks: buffer.append_array(block) return buffer # Godot is Little Endian by default, so the order here is crucial! static func _encode_uint32(value: int) -&gt; PackedByteArray: var arr = PackedByteArray() arr.append(value &amp; 0xFF) arr.append((value &gt;&gt; 8) &amp; 0xFF) arr.append((value &gt;&gt; 16) &amp; 0xFF) arr.append((value &gt;&gt; 24) &amp; 0xFF) return arr static func _encode_string(value: String) -&gt; PackedByteArray: var arr = PackedByteArray() for char in value: arr.append_array(char.to_ascii_buffer()) return arr With this component, we can now easily adjust our previous code: const Compression = preload('compression.gd') func _export_begin(features: PackedStringArray, is_debug: bool, path: String, flags: int): var pandora_path = "res://data.pandora" # open the uncompressed normal file from the project folder var file = FileAccess.open(pandora_path, FileAccess.READ) var text:String = file.get_as_text() # compress the file into the correct format so Godot can load it again var compressed:PackedByteArray = Compression.compress(text) add_file(pandora_path, compressed, false) file.close() With the above trick, you can now open the file via open_compressed without problems! I hope you enjoyed this little sneakpeak into the development of my addon. Feel free to checkout pandora for yourself. I also have a Youtube channel where I document my gamedev journey - check it out!]]></summary></entry><entry><title type="html">Godot Version Compatibility: A Guide for Addon Developers</title><link href="https://bitbrain.github.io/2023/09/03/godot-addon-compatibility.html" rel="alternate" type="text/html" title="Godot Version Compatibility: A Guide for Addon Developers" /><published>2023-09-03T00:00:00+00:00</published><updated>2023-09-03T00:00:00+00:00</updated><id>https://bitbrain.github.io/2023/09/03/godot-addon-compatibility</id><content type="html" xml:base="https://bitbrain.github.io/2023/09/03/godot-addon-compatibility.html"><![CDATA[<p><strong>Godot addons offer a powerful way to extend the engine’s functionality without having to modify its core.</strong> This flexibility empowers the community to create custom solutions without burdening the engine itself. However, as addon developers, we must strike a balance between compatibility and functionality. This article explores the trade-offs involved, focusing primarily on Godot Engine 4.x.</p>
 
 <h2 id="the-anatomy-of-a-godot-release">The Anatomy of a Godot Release</h2>
 
@@ -1133,242 +1412,4 @@ Done.
 </code></pre></div></div>
 <p>Your latest game version is now available on itch.io:</p>
 
-<p><img src="/public/media/itch-io-my-game-upload.png" alt="itch-io-my-game-upload" /></p>]]></content><author><name>bitbrain</name></author><category term="itchio" /><category term="deployment" /><category term="travisci" /><category term="gamedev" /><summary type="html"><![CDATA[This tutorial explains how you can very easily deploy your game to itch.io]]></summary></entry><entry><title type="html">Continuous Delivery with Travis and Github</title><link href="https://bitbrain.github.io/2018/07/15/cd-with-travis.html" rel="alternate" type="text/html" title="Continuous Delivery with Travis and Github" /><published>2018-07-15T00:00:00+00:00</published><updated>2018-07-15T00:00:00+00:00</updated><id>https://bitbrain.github.io/2018/07/15/cd-with-travis</id><content type="html" xml:base="https://bitbrain.github.io/2018/07/15/cd-with-travis.html"><![CDATA[<p>Some years ago I started working on a project called <a href="https://github.com/bitbrain/braingdx">braingdx</a>. It is a gamejam framework based on <a href="https://libgdx.badlogicgames.com/">libgdx</a>, fully written in <strong>Java</strong>. At some point I decided to make the artifact available for a broader audience. As a result I required a deployment flow to automatically upload the <strong>.jar</strong> files to an artifactory of my choice.</p>
-
-<h1 id="the-silly-approach">The silly approach</h1>
-
-<p>I just wanted to publish artifacts, but not on each commit. Instead, I decided to go for a multi-<a href="https://git-scm.com/docs/git-branch">branch</a> configuration like this:</p>
-
-<p><img src="/public/media/silly-git-flow.svg" alt="silly-git-flow" /></p>
-
-<p>We have a <code class="language-plaintext highlighter-rouge">master</code> branch where we commit on. When we decide to release an artifact, we manually (locally) merge into <code class="language-plaintext highlighter-rouge">deploy</code>, push the changes and <a href="https://travis-ci.org/">Travis CI</a> will pickup the build, thanks to the <code class="language-plaintext highlighter-rouge">.travis.yml</code> file configured:</p>
-<div class="language-yml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">language</span><span class="pi">:</span> <span class="s">java</span>
-
-<span class="na">services</span><span class="pi">:</span>
-  <span class="pi">-</span> <span class="s">docker</span>
-
-<span class="na">jdk</span><span class="pi">:</span>
-  <span class="pi">-</span> <span class="s">openjdk7</span>
-
-<span class="na">cache</span><span class="pi">:</span>
-    <span class="na">directories</span><span class="pi">:</span>
-        <span class="pi">-</span> <span class="s">$HOME/.m2</span>
-
-<span class="na">branches</span><span class="pi">:</span>
-  <span class="na">only</span><span class="pi">:</span>
-  <span class="pi">-</span> <span class="s">deploy</span>
-
-<span class="na">env</span><span class="pi">:</span>
-  <span class="na">global</span><span class="pi">:</span>
-    <span class="pi">-</span> <span class="s">COMMIT=${TRAVIS_COMMIT::8}</span>
-
-<span class="na">before_install</span><span class="pi">:</span>
-  <span class="pi">-</span> <span class="s">export CH_VERSION=$(docker run -v $(pwd):/chime bitbrain/chime:latest CHANGELOG.md version)</span>
-  <span class="pi">-</span> <span class="s">export CH_TEXT=$(docker run -v $(pwd):/chime bitbrain/chime:latest CHANGELOG.md text)</span>
-  <span class="pi">-</span> <span class="s">mvn versions:set -DnewVersion=$CH_VERSION</span>
-  <span class="pi">-</span> <span class="s">chmod +x deployment/deploy.sh</span>
-
-<span class="na">install</span><span class="pi">:</span>
-  <span class="pi">-</span> <span class="s">./deployment/deploy.sh</span>
-</code></pre></div></div>
-<p>The configuration file has a <code class="language-plaintext highlighter-rouge">before_install</code> section. In there we use a tool written by me called <a href="https://github.com/bitbrain/chime">chime</a>. We run this tool as a Docker container to extract version and changelog information from a <code class="language-plaintext highlighter-rouge">CHANGELOG.md</code> provided. For example, we have a file like this:</p>
-<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gh"># Version 1.1</span>
-
-This is version 1.1 description.
-<span class="p">
-*</span> some patchnotes
-<span class="p">*</span> more patchnotes
-
-<span class="gh"># Version 1.0</span>
-
-This is version 1.0 description.
-<span class="p">
-*</span> some patchnotes
-<span class="p">*</span> more patchnotes
-</code></pre></div></div>
-<p>The resulting environment variables would look like this (after <code class="language-plaintext highlighter-rouge">before_install</code> execution):</p>
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="o">&gt;</span> <span class="nb">echo</span> <span class="nv">$CH_VERSION</span>
-Version 1.1
-<span class="o">&gt;</span> <span class="nb">echo</span> <span class="nv">$CH_TEXT</span>
-This is version 1.0 description.<span class="se">\n</span><span class="k">*</span> some patchnotes<span class="se">\n</span><span class="k">*</span> more patchnotes
-</code></pre></div></div>
-<p>Using this approach we can define versions within a <code class="language-plaintext highlighter-rouge">CHANGELOG.md</code> file and it should automatically pick up the latest version from the file. We update the version of the library temporarily via <code class="language-plaintext highlighter-rouge">mvn versions:set</code> with the latest version extracted from the changelog file.</p>
-
-<p>Afterwards we run a <code class="language-plaintext highlighter-rouge">deploy.sh</code> script during the <code class="language-plaintext highlighter-rouge">install</code> stage:</p>
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>mvn deploy <span class="se">\</span>
-    <span class="nt">-DskipTests</span> <span class="se">\</span>
-    <span class="nt">--settings</span> deployment/settings.xml
-</code></pre></div></div>
-<p>I configured a custom Nexus inside my <code class="language-plaintext highlighter-rouge">settings.xml</code> to push my artifacts to. Users of my library then would need to add the repository via repository statement in their configuration.</p>
-
-<h1 id="silly-approach-lots-of-problems">Silly approach, lots of problems</h1>
-
-<p>The approach worked fine, however it was not as refined as I hoped it to be:</p>
-
-<ul>
-  <li>my custom Nexus caused SSL Certificate issues on some Windows and Mac machines when trying to download dependencies</li>
-  <li>it is truly cumbersome to manually switch between <code class="language-plaintext highlighter-rouge">master</code> and <code class="language-plaintext highlighter-rouge">deploy</code> locally and merge all the time</li>
-  <li>the current multi-branch approach causes lots of merge commits (if we are not able to fast-forward)</li>
-  <li>sometimes you would forget to switch from <code class="language-plaintext highlighter-rouge">deploy</code> back to <code class="language-plaintext highlighter-rouge">master</code> locally and suddenly commiting on a wrong branch</li>
-  <li>not easy to have a mapping from version to commit history (missing <a href="https://git-scm.com/book/en/v2/Git-Basics-Tagging">tagging</a> functionality)</li>
-  <li>Travis only builds the <code class="language-plaintext highlighter-rouge">deploy</code> branch, not the master branch. We never truly compile each commit on <code class="language-plaintext highlighter-rouge">master</code> nor run any tests</li>
-</ul>
-
-<p>After putting some thought into it I came up with a much better, more light-weighted approach.</p>
-
-<h1 id="one-branch-to-rule-them-all">One branch to rule them all</h1>
-
-<p>I eventually decided to get rid of the <code class="language-plaintext highlighter-rouge">deploy</code> branch after all. All commits should go to <code class="language-plaintext highlighter-rouge">master</code> and should be tested and/or deployed on Travis. I would keep the <code class="language-plaintext highlighter-rouge">CHANGELOG.md</code> version extraction and do additional checks to avoid deploying already deployed versions twice:</p>
-
-<p><img src="/public/media/simple-branch-flow.svg" alt="simple-branch-flow" /></p>
-
-<p>The new flow is executed whenever a new commit is pushed onto <code class="language-plaintext highlighter-rouge">master</code>:</p>
-
-<ol>
-  <li>checkout from SCM</li>
-  <li>extract version and changelog from <code class="language-plaintext highlighter-rouge">CHANGELOG.md</code></li>
-  <li>Sign artifacts - this is required in order to push artifacts to <a href="https://search.maven.org/">Maven Central</a></li>
-  <li>Install/Deployment
-    <ul>
-      <li>verify if the latest git tag is different than version extracted. Run deployment when extracted version from <code class="language-plaintext highlighter-rouge">CHANGELOG.md</code> is newer</li>
-      <li>when there is no difference in version, the version had been deployed already. Instead, run unit tests and generate code coverage reports</li>
-    </ul>
-  </li>
-  <li>Upload additional artifacts
-    <ul>
-      <li>happens on <strong>after_install</strong> stage</li>
-      <li>when the new version is different than the latest tag create a new <a href="https://help.github.com/articles/creating-releases/">Github Release</a> which will automatically create a new tag with the current version</li>
-      <li>upload <a href="http://bitbrain.github.io/braingdx/docs/latest/">latest Javadoc</a> to Github</li>
-    </ul>
-  </li>
-</ol>
-
-<p>In the rest of this article I will explain how some of these steps work in detail.</p>
-
-<h1 id="sign-your-artifacts">Sign your Artifacts</h1>
-
-<p>In order to upload your artifacts to Central you require to sign your artifacts with a GPG signature. I recommend <a href="http://www.debonair.io/post/maven-cd/">reading this tutorial</a> to learn how to do that.</p>
-
-<p>In the tutorial the author explains that we want to encrypt our <code class="language-plaintext highlighter-rouge">codesigning.asc</code> file to prevent strangers from stealing it. We do that by installing and using the <strong>travis</strong> CLI:</p>
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gem <span class="nb">install </span>travis
-travis login
-travis encrypt-file codesigning.asc
-</code></pre></div></div>
-<p>When running this I discovered that Travis would fail the build:</p>
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bad decrypt
-gpg: invalid radix64 character AE skipped
-gpg: invalid radix64 character 13 skipped
-gpg: invalid radix64 character F5 skipped
-gpg: invalid radix64 character BE skipped
-gpg: invalid radix64 character C5 skipped
-gpg: invalid radix64 character AF skipped
-gpg: invalid radix64 character C8 skipped
-gpg: invalid radix64 character 14 skipped
-gpg: invalid radix64 character 82 skipped
-gpg: invalid radix64 character DF skipped
-...
-</code></pre></div></div>
-<p>What is going on?! I followed the tutorial step by step and for me it did not want to work. After hours of desperation and crying on the floor I found <a href="https://github.com/travis-ci/travis-ci/issues/6936">something on Github</a>. Apparently, on my Windows 10 machine the <code class="language-plaintext highlighter-rouge">travis encrypt-file</code> operation is broken and produces a corrupted encryption. WOW! Thanks for that. How did I fix it? A little bit of Docker 🐳 for the win. Let’s create a <code class="language-plaintext highlighter-rouge">Dockerfile</code>:</p>
-<div class="language-dockerfile highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">FROM</span><span class="s"> ubuntu</span>
-<span class="k">RUN </span>apt-get update <span class="o">&amp;&amp;</span> apt-get <span class="nb">install </span>ruby ruby-dev gcc g++ make <span class="o">&amp;&amp;</span> gem <span class="nb">install </span>travis
-<span class="k">VOLUME</span><span class="s"> /test</span>
-<span class="k">COPY</span><span class="s"> codesigning.asc /test/codesigning.asc</span>
-<span class="k">ENV</span><span class="s"> GITHUB_TOKEN=""</span>
-<span class="k">CMD</span><span class="s"> ["bash", "travis login --github-token $GITHUB_TOKEN &amp;&amp; travis-encrypt codesigning.asc &amp;&amp; echo codesigning.asc.enc"]</span>
-</code></pre></div></div>
-<p>And then:</p>
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Build our image</span>
-docker build <span class="nt">-t</span> encrypt-asc <span class="nb">.</span>
-<span class="c"># Encrypt the file and produce it</span>
-docker run <span class="nt">-e</span> <span class="nv">GITHUB_TOKEN</span><span class="o">=</span>xxx encrypt-asc <span class="o">&gt;</span> codesigning.asc.enc
-<span class="c"># Clean up the dirty mess!</span>
-docker <span class="nb">rm </span>encrypt-asc <span class="nt">-f</span>
-</code></pre></div></div>
-<p>After committing the <strong>codesigning.asc.enc</strong> file Travis was able to decrypt the GPG private key which is required to sign the artifacts.</p>
-
-<h1 id="check-if-version-is-changed">Check if version is changed</h1>
-
-<p>In order to check if the version has changed I did the following during the <code class="language-plaintext highlighter-rouge">before_install</code> stage:</p>
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">export </span><span class="nv">LATEST_TAG</span><span class="o">=</span><span class="si">$(</span>git describe <span class="nt">--abbrev</span><span class="o">=</span>0 <span class="nt">--tags</span><span class="si">)</span>
-</code></pre></div></div>
-<p>After that we can deploy or just run the tests, depending of the version:</p>
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">if</span> <span class="o">[</span> <span class="s2">"</span><span class="nv">$LATEST_TAG</span><span class="s2">"</span> <span class="o">!=</span> <span class="s2">"</span><span class="nv">$CH_VERSION</span><span class="s2">"</span> <span class="o">]</span><span class="p">;</span> <span class="k">then
-</span><span class="nb">echo</span> <span class="s2">"Latest deployed version=</span><span class="nv">$LATEST_TAG</span><span class="s2"> not equal new version=</span><span class="nv">$CH_VERSION</span><span class="s2">. Deploying..."</span>
-mvn deploy <span class="se">\</span>
-    <span class="nt">-Psign</span> <span class="se">\</span>
-    <span class="nt">--settings</span> deployment/settings.xml
-<span class="k">else
-</span><span class="nb">echo</span> <span class="s2">"Skipping release! </span><span class="nv">$LATEST_TAG</span><span class="s2"> already released to Nexus! Running tests..."</span>
-mvn clean <span class="nb">test</span> <span class="nt">-T4</span>
-<span class="k">fi</span>
-</code></pre></div></div>
-<h1 id="pushing-new-release-to-github">Pushing new release to Github</h1>
-
-<p>In order to push the new release automatically to Github, we do the following on the <code class="language-plaintext highlighter-rouge">after_install</code> stage:</p>
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">cd</span> <span class="nv">$HOME</span>
-git config <span class="nt">--global</span> user.email <span class="s2">"sirlancelbot@gmail.com"</span>
-git config <span class="nt">--global</span> user.name <span class="s2">"Sir Lancelbot"</span>
-git clone <span class="nt">--quiet</span> <span class="nt">--branch</span><span class="o">=</span>master https://<span class="k">${</span><span class="nv">GITHUB_TOKEN</span><span class="k">}</span>@github.com/bitbrain/braingdx
-
-<span class="c"># Replacing line endings in body</span>
-<span class="nv">body</span><span class="o">=</span><span class="si">$(</span><span class="nb">sed</span> <span class="nt">-E</span> <span class="s1">':a;N;$!ba;s/\r{0,1}\n/\\n/g'</span> &lt;<span class="o">(</span><span class="nb">echo</span> <span class="s2">"</span><span class="nv">$CH_TEXT</span><span class="s2">"</span><span class="o">)</span><span class="si">)</span>
-<span class="nv">json</span><span class="o">=</span><span class="s1">'{"tag_name":"'</span><span class="nv">$CH_VERSION</span><span class="s1">'","target_commitish":"'</span><span class="nv">$TRAVIS_BRANCH</span><span class="s1">'","name":"Version '</span><span class="nv">$CH_VERSION</span><span class="s1">'","body":"'</span><span class="nv">$body</span><span class="s1">'","draft":false,"prerelease":false}'</span>
-
-curl <span class="nt">-X</span> POST <span class="se">\</span>
-<span class="nt">-u</span> bitbrain:<span class="nv">$GITHUB_TOKEN</span> <span class="se">\</span>
-<span class="nt">-d</span> <span class="s2">"</span><span class="nv">$json</span><span class="s2">"</span> https://api.github.com/repos/bitbrain/braingdx/releases
-</code></pre></div></div>
-<p>This will ensure that a latest release has been pushed (including latest changelog content from <code class="language-plaintext highlighter-rouge">CHANGELOG.md</code> and Github will automatically create a tag for us. Next time we run the pipeline, it won’t deploy again since the tag has been updated.</p>
-
-<h1 id="uploading-javadoc-to-github-pages">Uploading Javadoc to Github pages</h1>
-
-<p>Uploading Javadoc to Github pages is a little bit more tricky. I want to have the following requirements fullfilled:</p>
-
-<ul>
-  <li>each version is persisted in Github pages, e.g. <code class="language-plaintext highlighter-rouge">/docs/1.0.0</code></li>
-  <li>the latest docs should be available via <code class="language-plaintext highlighter-rouge">/docs/latest</code></li>
-</ul>
-
-<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Create temporary directory</span>
-<span class="nb">mkdir cd</span> <span class="nv">$HOME</span>/docs
-<span class="nb">cd</span> <span class="nv">$HOME</span>/braingdx
-mvn versions:set <span class="nt">-DskipTests</span> <span class="nt">-DnewVersion</span><span class="o">=</span><span class="nv">$CH_VERSION</span> <span class="nt">-T4</span> <span class="o">&amp;&amp;</span> mvn javadoc:javadoc <span class="nt">-DskipTests</span> <span class="nt">-T4</span>
-<span class="nb">cd</span> <span class="nv">$HOME</span>/docs
-<span class="c"># Copy generated Javadocs into a temporary directory</span>
-<span class="nb">cp</span> <span class="nt">-r</span> <span class="nv">$HOME</span>/braingdx/core/target/site/apidocs/<span class="k">*</span> <span class="nv">$HOME</span>/docs
-
-<span class="c"># Cleanup</span>
-<span class="nb">rm</span> <span class="nt">-rf</span> <span class="nv">$HOME</span>/braingdx/<span class="k">*</span>
-<span class="nb">cd</span> <span class="nv">$HOME</span>/braingdx
-
-<span class="c"># Checkout Jekyll branch and create new folder with new version</span>
-git checkout gh-pages
-<span class="nb">mkdir</span> <span class="nt">-p</span> <span class="nv">$HOME</span>/braingdx/docs/<span class="nv">$CH_VERSION</span>
-<span class="nb">cp</span> <span class="nt">-r</span> <span class="nv">$HOME</span>/docs/<span class="k">*</span> <span class="nv">$HOME</span>/braingdx/docs/<span class="nv">$CH_VERSION</span>
-
-<span class="c"># Copy also into "latest" docs</span>
-<span class="nb">rm</span> <span class="nt">-rf</span> <span class="nv">$HOME</span>/braingdx/docs/latest
-<span class="nb">mkdir</span> <span class="nt">-p</span> <span class="nv">$HOME</span>/braingdx/docs/latest
-<span class="nb">cp</span> <span class="nt">-r</span> <span class="nv">$HOME</span>/docs/<span class="k">*</span> <span class="nv">$HOME</span>/braingdx/docs/latest
-
-<span class="c"># Add everything and push!</span>
-git add <span class="nt">-f</span> <span class="k">*</span>
-git commit <span class="nt">-m</span> <span class="s2">"Travis build </span><span class="nv">$TRAVIS_BUILD_NUMBER</span><span class="s2"> - update Javadoc"</span>
-git push <span class="nt">-fq</span> origin gh-pages <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">"Successfully deployed Javadoc to /docs"</span>
-</code></pre></div></div>
-
-<p><a href="http://bitbrain.github.io/braingdx/docs/latest/">Click here</a> to see an example of the generated page created.</p>
-
-<h1 id="conclusion">Conclusion</h1>
-
-<p>The new flow allows me to have:</p>
-<ul>
-  <li>single branch</li>
-  <li>every commit is tested in Travis</li>
-  <li>I control deployments via <code class="language-plaintext highlighter-rouge">CHANGELOG.md</code></li>
-  <li>Github releases and tags are automatically created</li>
-  <li>Javadoc is automatically created</li>
-  <li>on release, artifacts are signed and pushed to Maven Central</li>
-</ul>
-
-<p>Do you have feedback? Make sure to follow me <a href="https://twitter.com/bitbrain_">@bitbrain_</a> on <strong>Twitter</strong> and <a href="https://github.com/bitbrain">@bitbrain</a> on <strong>Github</strong>.</p>]]></content><author><name>bitbrain</name></author><category term="deployment" /><category term="travisci" /><category term="git" /><summary type="html"><![CDATA[I have released a new library on Maven central. Let me explain how I did that.]]></summary></entry></feed>
+<p><img src="/public/media/itch-io-my-game-upload.png" alt="itch-io-my-game-upload" /></p>]]></content><author><name>bitbrain</name></author><category term="itchio" /><category term="deployment" /><category term="travisci" /><category term="gamedev" /><summary type="html"><![CDATA[This tutorial explains how you can very easily deploy your game to itch.io]]></summary></entry></feed>
